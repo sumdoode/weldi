@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
-import { appErrorHandler } from "./upload-errors.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "server/data");
 const uploadDir = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(root, "server/uploads");
@@ -188,5 +188,5 @@ app.delete("/api/welds/:id",async(req,res,next)=>{try{const files=await updateDb
 
 app.use(express.static(path.join(root,"dist")));
 app.get("/{*path}",async(req,res,next)=>{if(req.path.startsWith("/api/")||req.path.startsWith("/uploads/"))return next();try{await fs.access(path.join(root,"dist/index.html"));res.sendFile(path.join(root,"dist/index.html"));}catch{res.status(404).send("Run npm run build first.");}});
-app.use(appErrorHandler);
+
 app.listen(port,"0.0.0.0",()=>console.log(`Weld Photo Log server: http://localhost:${port}`));
