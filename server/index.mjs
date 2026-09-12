@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
+import { appErrorHandler } from "../../../Downloads/weld-photo-log-selfhosted 3/server/upload-errors.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "server/data");
@@ -71,6 +72,7 @@ const upload = multer({
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use("/uploads", express.static(uploadDir, { index: false, maxAge: "1h" }));
+app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/api/welders", async (_req,res,next)=>{try{const db=await readDb();res.json({welders:[...db.welders].sort((a,b)=>a.code.localeCompare(b.code))});}catch(e){next(e);}});
@@ -187,5 +189,5 @@ app.delete("/api/welds/:id",async(req,res,next)=>{try{const files=await updateDb
 
 app.use(express.static(path.join(root,"dist")));
 app.get("/{*path}",async(req,res,next)=>{if(req.path.startsWith("/api/")||req.path.startsWith("/uploads/"))return next();try{await fs.access(path.join(root,"dist/index.html"));res.sendFile(path.join(root,"dist/index.html"));}catch{res.status(404).send("Run npm run build first.");}});
-app.use((error,_req,res,_next)=>{console.error(error);res.status(error.status||400).json({error:error.message||"Something went wrong."});});
+app.use(appErrorHandler);
 app.listen(port,"0.0.0.0",()=>console.log(`Weld Photo Log server: http://localhost:${port}`));

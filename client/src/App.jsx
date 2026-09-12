@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { cacheAppData, getCachedAppData, getPending, queueInspection, syncPending } from "./offlineDb";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cacheAppData, getCachedAppData, getPending, pauseSync, queueInspection, syncPending } from "./offlineDb";
+import { requestJson } from "./syncCore.js";
+import { createSyncScheduler } from "./syncScheduler.js";
 
 const today=()=>new Date().toISOString().slice(0,10);
 const clean=value=>String(value??"").trim()||"UNK";
@@ -11,27 +13,65 @@ export default function App(){
   const [finalRecord,setFinalRecord]=useState(null),[finalPhoto,setFinalPhoto]=useState(null),[finalPreview,setFinalPreview]=useState(""),[finalWelderId,setFinalWelderId]=useState("UNK");
   const [directPhoto,setDirectPhoto]=useState(null),[directPreview,setDirectPreview]=useState(""),[directWelderId,setDirectWelderId]=useState("UNK");
   const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
-  const [online,setOnline]=useState(navigator.onLine),[serverAvailable,setServerAvailable]=useState(null),[pending,setPending]=useState([]),[syncing,setSyncing]=useState(false);
+  const [serverAvailable,setServerAvailable]=useState(null),[pending,setPending]=useState([]),[syncing,setSyncing]=useState(false);
+  const [ready,setReady]=useState(false),[syncMessage,setSyncMessage]=useState(""),[syncCode,setSyncCode]=useState("");
   const formRef=useRef(null);
   const directFormRef=useRef(null);
-  const syncingRef=useRef(false);
+  const schedulerRef=useRef(null);
   const pendingViews=useMemo(()=>{
     const urls=[];
-    const photoUrl=item=>{if(!item.photo)return null;const url=URL.createObjectURL(item.photo);urls.push(url);return url};
+    const photoUrl=item=>{if(!(item.photo instanceof Blob))return null;const url=URL.createObjectURL(item.photo);urls.push(url);return url};
     const finalsByClient=new Map(),finalsByRecord=new Map();
     pending.filter(item=>item.type==="final").forEach(item=>{const view={...item,_photoUrl:photoUrl(item)};(item.targetClientId?finalsByClient:finalsByRecord).set(item.targetClientId||item.targetRecordId,view)});
     const applyFinal=(record,item)=>item?{...record,...item.fields,status:"COMPLETE",finalPhotoUrl:item._photoUrl,syncStatus:item.status}:record;
     const roots=pending.filter(item=>item.type==="root").map(item=>applyFinal({id:`local-${item.id}`,_pendingClientId:item.id,status:"AWAITING_FINAL",...item.fields,welderId:item.fields.welderId,finalWelderId:"UNK",finalDate:"UNK",finalVtDate:"UNK",rootPhotoUrl:photoUrl(item),finalPhotoUrl:null,syncStatus:item.status},finalsByClient.get(item.id)));
     const direct=pending.filter(item=>item.type==="final-only").map(item=>({id:`local-${item.id}`,status:"COMPLETE",lineNo:item.fields.lineNo,weldNo:item.fields.weldNo,rework:"N/A",welderId:"N/A",rootDate:"N/A",rootVtDate:"N/A",finalWelderId:item.fields.finalWelderId,finalDate:item.fields.finalDate,finalVtDate:item.fields.finalVtDate,rootPhotoUrl:null,finalPhotoUrl:photoUrl(item),syncStatus:item.status}));
-    return {roots,direct,finalsByRecord,urls};
+    return {roots,direct,finalsByRecord,finalsByClient,urls};
   },[pending]);
-  const displayedRecords=[...pendingViews.direct,...pendingViews.roots,...records.map(r=>{const item=pendingViews.finalsByRecord.get(r.id);return item?{...r,...item.fields,status:"COMPLETE",finalPhotoUrl:item._photoUrl,syncStatus:item.status}:r})];
+  const localCreates=new Set(pending.filter(item=>item.type!=="final").map(item=>item.id));
+  const displayedRecords=[...pendingViews.direct,...pendingViews.roots,...records.filter(r=>!localCreates.has(r.clientRequestId)).map(r=>{const item=pendingViews.finalsByRecord.get(r.id)||pendingViews.finalsByClient.get(r.clientRequestId);return item?{...r,...item.fields,status:"COMPLETE",finalPhotoUrl:item._photoUrl,syncStatus:item.status}:r})];
   const awaiting=displayedRecords.filter(r=>r.status!=="COMPLETE");
-  const refreshPending=async()=>setPending((await getPending()).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));
-  const load=async(showError=true)=>{try{const [wr,ir]=await Promise.all([fetch("/api/welds"),fetch("/api/welders")]);const w=await wr.json(),i=await ir.json();if(!wr.ok||!ir.ok)throw new Error(w.error||i.error);setRecords(w.records);setWelders(i.welders);await cacheAppData({records:w.records,welders:i.welders,savedAt:new Date().toISOString()});if(showError)setError("")}catch(e){const cached=await getCachedAppData();if(cached){setRecords(cached.records||[]);setWelders(cached.welders||[])}else if(showError&&navigator.onLine)setError(e.message)}finally{setLoading(false)}};
-  const runSync=async()=>{if(syncingRef.current||!navigator.onLine)return;syncingRef.current=true;setSyncing(true);try{const result=await syncPending();setServerAvailable(result.serverAvailable);await refreshPending();if(result.synced){await load(false);setNotice(`${result.synced} offline inspection${result.synced===1?"":"s"} synchronized.`)}}finally{syncingRef.current=false;setSyncing(false)}};
-  useEffect(()=>{refreshPending();load();const onOnline=()=>{setOnline(true);runSync()},onOffline=()=>{setOnline(false);setServerAvailable(false)},onQueue=()=>refreshPending();window.addEventListener("online",onOnline);window.addEventListener("offline",onOffline);window.addEventListener("weld-sync-change",onQueue);return()=>{window.removeEventListener("online",onOnline);window.removeEventListener("offline",onOffline);window.removeEventListener("weld-sync-change",onQueue)}},[]);
-  useEffect(()=>{if(online&&pending.length)runSync()},[online,pending.length]);
+  const refreshPending=useCallback(async()=>setPending((await getPending()).sort((a,b)=>a.createdAt.localeCompare(b.createdAt))),[]);
+  const refreshLocal=useCallback(async()=>{
+    const [items,cached]=await Promise.all([getPending(),getCachedAppData()]);
+    setPending(items.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));
+    if(cached){setRecords(cached.records||[]);setWelders(cached.welders||[])}
+  },[]);
+  const load=useCallback(async()=>{
+    const [w,i]=await Promise.all([requestJson("/api/welds"),requestJson("/api/welders")]);
+    if(!Array.isArray(w.records)||!Array.isArray(i.welders))throw new Error("The server did not return a weld record list.");
+    await cacheAppData({records:w.records,welders:i.welders,savedAt:new Date().toISOString()});
+    setRecords(w.records);setWelders(i.welders);
+  },[]);
+  const runSync=useCallback(async(options)=>{
+    setSyncing(true);
+    try{
+      const result=await syncPending(options);
+      if(typeof result.serverAvailable==="boolean")setServerAvailable(result.serverAvailable);
+      setSyncMessage(result.message||"");setSyncCode(result.code||"");
+      await refreshLocal();
+      if(result.synced)setNotice(`${result.synced} inspection${result.synced===1?"":"s"} confirmed by the server.`);
+      if(result.serverAvailable){
+        try{await load()}catch(e){setSyncMessage(`Saved records remain on this device. Could not refresh the server list: ${e.message}`)}
+      }
+      return result;
+    }catch(e){setSyncMessage(e.message||"Sync could not finish. Pending inspections have been kept.");setSyncCode("storage");throw e}
+    finally{setSyncing(false)}
+  },[load,refreshLocal]);
+  useEffect(()=>{
+    const onQueue=()=>{refreshLocal().catch(e=>setError(e.message))};
+    const onOffline=()=>setServerAvailable(false);
+    refreshLocal().then(()=>setReady(true)).catch(e=>setError(e.message)).finally(()=>setLoading(false));
+    window.addEventListener("weld-sync-change",onQueue);
+    window.addEventListener("offline",onOffline);
+    return()=>{window.removeEventListener("weld-sync-change",onQueue);window.removeEventListener("offline",onOffline)};
+  },[refreshLocal]);
+  useEffect(()=>{
+    if(!ready)return;
+    const scheduler=createSyncScheduler({run:runSync,pause:pauseSync});
+    schedulerRef.current=scheduler;
+    return()=>{scheduler.stop();schedulerRef.current=null};
+  },[ready,runSync]);
   useEffect(()=>()=>pendingViews.urls.forEach(url=>URL.revokeObjectURL(url)),[pendingViews]);
   useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
   useEffect(()=>()=>{if(finalPreview)URL.revokeObjectURL(finalPreview)},[finalPreview]);
@@ -40,7 +80,7 @@ export default function App(){
   const reset=()=>{formRef.current?.reset();if(preview)URL.revokeObjectURL(preview);setPhoto(null);setPreview("");setWelderId("UNK")};
   const saveRoot=async e=>{e.preventDefault();if(!photo){setError("Take or choose a root inspection photo first.");return}setSaving(true);setError("");setNotice("");const raw=new FormData(e.currentTarget),fields={};["lineNo","weldNo","rework","rootDate","rootVtDate"].forEach(k=>fields[k]=clean(raw.get(k)));fields.welderId=welderId;try{await queueInspection("root",fields,photo);reset();await refreshPending();setNotice(`Root inspection for weld ${fields.weldNo} saved on this phone — pending sync.`);setTab("awaiting")}catch(e){setError(e.message)}finally{setSaving(false)}};
   const openFinal=record=>{setFinalRecord(record);setFinalWelderId(record.welderId||"UNK")};
-  const saveFinal=async e=>{e.preventDefault();if(!finalPhoto){setError("Take or choose a final inspection photo.");return}setSaving(true);setError("");const raw=new FormData(e.currentTarget),fields={finalDate:clean(raw.get("finalDate")),finalVtDate:clean(raw.get("finalVtDate")),finalWelderId};try{await queueInspection("final",fields,finalPhoto,finalRecord._pendingClientId||null,finalRecord._pendingClientId?null:finalRecord.id);const weldNo=finalRecord.weldNo;closeFinal();await refreshPending();setNotice(`Final inspection for weld ${weldNo} saved on this phone — pending sync.`);setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
+  const saveFinal=async e=>{e.preventDefault();if(!finalPhoto){setError("Take or choose a final inspection photo.");return}setSaving(true);setError("");const raw=new FormData(e.currentTarget),fields={lineNo:finalRecord.lineNo,weldNo:finalRecord.weldNo,finalDate:clean(raw.get("finalDate")),finalVtDate:clean(raw.get("finalVtDate")),finalWelderId};try{await queueInspection("final",fields,finalPhoto,finalRecord._pendingClientId||null,finalRecord._pendingClientId?null:finalRecord.id);const weldNo=finalRecord.weldNo;closeFinal();await refreshPending();setNotice(`Final inspection for weld ${weldNo} saved on this phone — pending sync.`);setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
   const closeFinal=()=>{if(finalPreview)URL.revokeObjectURL(finalPreview);setFinalRecord(null);setFinalPhoto(null);setFinalPreview("");setFinalWelderId("UNK")};
   const resetDirect=()=>{directFormRef.current?.reset();if(directPreview)URL.revokeObjectURL(directPreview);setDirectPhoto(null);setDirectPreview("");setDirectWelderId("UNK")};
   const saveDirect=async e=>{e.preventDefault();if(!directPhoto){setError("Take or choose a final inspection photo.");return}setSaving(true);setError("");setNotice("");const raw=new FormData(e.currentTarget),fields={};["lineNo","weldNo","finalDate","finalVtDate"].forEach(k=>fields[k]=clean(raw.get(k)));fields.finalWelderId=directWelderId;try{await queueInspection("final-only",fields,directPhoto);resetDirect();await refreshPending();setNotice(`Final-only inspection for weld ${fields.weldNo} saved on this phone — pending sync.`);setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
@@ -52,9 +92,13 @@ export default function App(){
   const downloadPdf=()=>{window.location.href="/api/export/pdf"};
   const share=async()=>{if(navigator.canShare?.({files:[csv]}))await navigator.share({title:"Weld Photo Log",files:[csv]});else{download();location.href="mailto:?subject=Weld%20Photo%20Log&body=Attach%20the%20downloaded%20CSV%20file."}};
 
-  return <main><header><div className="brand"><span className="logo">◉</span><div><h1>Weld Photo Log</h1><small>Root and final inspection tracker</small></div></div><b>{records.length} synced</b></header>
-    <div className="shell"><div className={`connection ${online&&serverAvailable!==false?"online":"offline"}`}><span>{online&&serverAvailable!==false?"● Online":"● Offline"}</span><b>{pending.length?`${pending.length} pending ${syncing?"· checking connection…":""}`:"All inspections synced"}</b>{online&&pending.length>0&&<button onClick={runSync} disabled={syncing}>Sync now</button>}</div>{error&&<div className="alert error">× {error}</div>}{notice&&<div className="alert success">✓ {notice}</div>}
-      <nav className="four-tabs"><button className={tab==="root"?"active":""} onClick={()=>setTab("root")}>◉ Root</button><button className={tab==="final"?"active":""} onClick={()=>setTab("final")}>Final Only</button><button className={tab==="awaiting"?"active":""} onClick={()=>setTab("awaiting")}>Awaiting ({awaiting.length})</button><button className={tab==="records"?"active":""} onClick={()=>setTab("records")}>Records ({records.length})</button></nav>
+  return <main><header><div className="brand"><span className="logo">◉</span><div><h1>Weld Photo Log</h1><small>Root and final inspection tracker · Sync fix 1.1.1</small></div></div><b>{displayedRecords.length} welds</b></header>
+    <div className="shell"><div className={`connection ${serverAvailable?"online":"offline"}`} role="status"><span>{syncing?"Connecting / syncing…":serverAvailable?"Server connected":serverAvailable===null?"Checking server…":"Server unavailable"}</span><b>{!ready?(loading?"Reading phone storage…":"Phone storage unavailable"):pending.length?`${pending.length} pending upload${pending.length===1?"":"s"}`:"All inspections synced"}</b><button onClick={()=>schedulerRef.current?.retry()} disabled={syncing||!ready}>Sync now</button></div>
+      {pending.length>0&&<div className="sync-help">Keep this app open while syncing. It retries automatically (up to 60 seconds between retries) and when you return to it. Do not clear website data.</div>}
+      {syncMessage&&<div className="alert error" role="alert">{syncMessage}{["auth","unexpected-response"].includes(syncCode)&&<p><a href="/api/health" target="_blank" rel="noreferrer">Open server / sign in again</a>, then return here and tap Sync now.</p>}</div>}
+      {pending.length>0&&<details className="pending-details"><summary>Pending uploads ({pending.length}) — show status / errors</summary>{pending.map(item=><div key={item.id}><strong>{item.type.toUpperCase()} · Weld {item.fields?.weldNo||"UNK"}</strong><span>{item.status==="syncing"?(syncing?"Uploading…":"Waiting to retry"):item.retryable===false?"Needs attention — tap Sync now to retry":"Saved on this device — waiting to sync"}</span>{item.error&&<p>{item.error}</p>}<small>Request {item.id} · {item.attempts||0} attempt(s)</small></div>)}</details>}
+      {error&&<div className="alert error">× {error}</div>}{notice&&<div className="alert success">✓ {notice}</div>}
+      <nav className="four-tabs"><button className={tab==="root"?"active":""} onClick={()=>setTab("root")}>◉ Root</button><button className={tab==="final"?"active":""} onClick={()=>setTab("final")}>Final Only</button><button className={tab==="awaiting"?"active":""} onClick={()=>setTab("awaiting")}>Awaiting ({awaiting.length})</button><button className={tab==="records"?"active":""} onClick={()=>setTab("records")}>Records ({displayedRecords.length})</button></nav>
       {tab==="root"&&<form ref={formRef} onSubmit={saveRoot} className="capture-grid">
         <section className="card"><h2>1. Root inspection photo</h2><div className="card-body"><label className="photo">{preview?<img src={preview} alt="Selected root inspection"/>:<><span className="camera">▣</span><strong>Take root photo</strong><small>or choose one from your phone</small></>}<input type="file" accept="image/*" capture="environment" onChange={e=>pick(e.target.files?.[0],setPhoto,setPreview,preview)}/>{preview&&<em>Tap to retake</em>}</label></div></section>
         <section className="card"><h2>2. Root weld details <small>The final inspection will reuse the line and weld numbers.</small></h2><div className="fields"><Field label="Line number" name="lineNo" inputMode="numeric" placeholder="e.g. 4196"/><Field label="Weld number" name="weldNo" inputMode="numeric" placeholder="e.g. 4062"/><label><span>Root welder ID <button type="button" className="link" onClick={()=>setManage(true)}>⚙ Manage list</button></span><select value={welderId} onChange={e=>setWelderId(e.target.value)}><option value="UNK">UNK — Unknown</option>{welders.map(w=><option key={w.id} value={w.code}>{w.code}</option>)}</select></label><Field label="Rework" name="rework" placeholder="e.g. R1 or leave blank"/><Field label="Root date" name="rootDate" type="date"/><Field label="Root VT date" name="rootVtDate" type="date" defaultValue={today()}/></div><div className="actions"><button type="button" className="secondary" onClick={reset}>↻</button><button disabled={saving} className="primary">{saving?"Saving…":"✓ Save root inspection"}</button></div></section>

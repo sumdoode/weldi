@@ -4,14 +4,17 @@ import App from "./App.jsx";
 import "./styles.css";
 
 if ("serviceWorker" in navigator) {
-  const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
   window.addEventListener("load", () => {
-    if (isLocalHost) {
-      // Never let an old PWA cache interfere with local production testing.
-      navigator.serviceWorker.getRegistrations().then(registrations => registrations.forEach(registration => registration.unregister()));
+    if (import.meta.env.DEV) {
+      // Production builds (including localhost) enable offline app loading.
+      navigator.serviceWorker.getRegistrations().then(registrations => registrations.forEach(registration => {
+        if (registration.active?.scriptURL === new URL("/sw.js", location.href).href) registration.unregister();
+      }));
       return;
     }
-    if (import.meta.env.PROD) navigator.serviceWorker.register("/sw.js");
+    navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(error => {
+      console.warn("Offline app loading could not be enabled. Pending inspections remain in IndexedDB.", error);
+    });
   });
 }
 
