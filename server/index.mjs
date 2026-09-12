@@ -6,8 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
-import { appErrorHandler } from "../../../Downloads/weld-photo-log-selfhosted 3/server/upload-errors.mjs";
-
+import { appErrorHandler } from "./upload-errors.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "server/data");
 const uploadDir = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(root, "server/uploads");
