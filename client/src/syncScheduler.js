@@ -9,10 +9,10 @@ export function createSyncScheduler({ run, pause, windowTarget = window, documen
   const clear = () => { if (timer !== null) clearTimer(timer); timer = null; };
   const schedule = delay => {
     clear();
-    if (!stopped && documentTarget.visibilityState !== "hidden") timer = setTimer(() => attempt(), delay);
+    if (!stopped && documentTarget.visibilityState !== "hidden" && windowTarget.navigator.onLine !== false) timer = setTimer(() => attempt(), delay);
   };
   async function attempt(force = false) {
-    if (stopped || documentTarget.visibilityState === "hidden") return;
+    if (stopped || documentTarget.visibilityState === "hidden" || windowTarget.navigator.onLine === false) return;
     if (running) { rerun = true; rerunForce ||= force; return; }
     clear();
     running = true;
@@ -38,7 +38,7 @@ export function createSyncScheduler({ run, pause, windowTarget = window, documen
     if (documentTarget.visibilityState === "hidden") { clear(); pause?.(); }
     else retry();
   };
-  const offline = () => { pause?.(); schedule(10000); };
+  const offline = () => { pause?.(); clear(); };
   windowTarget.addEventListener("online", retry);
   windowTarget.addEventListener("offline", offline);
   windowTarget.addEventListener("focus", retry);

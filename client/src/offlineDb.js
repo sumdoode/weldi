@@ -124,7 +124,8 @@ const engine = createSyncEngine({ getPending, putPending, acknowledge, preparePh
 });
 let activeSync = null;
 export function syncPending(options) {
-  if (activeSync) return activeSync;
+  // A forced retry must not be swallowed by an in-flight scheduled sync.
+  if (activeSync) return options?.force ? activeSync.then(() => syncPending(options)) : activeSync;
   // Web Locks serialize tabs/PWA windows when supported; the engine's
   // single-flight guard still works where Web Locks are unavailable.
   activeSync = (globalThis.navigator?.locks?.request
