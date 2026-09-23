@@ -20,42 +20,50 @@ export default function App(){
   const schedulerRef=useRef(null);
   const pendingViews=useMemo(()=>{
     const urls=[];
-    const photoUrl=item=>{if(!(item.photo instanceof Blob))return null;const url=URL.createObjectURL(item.photo);urls.push(url);return url};
+    const photoUrl=item=>{if(!(item.photo instanceof Blob))return null;
+    const url=URL.createObjectURL(item.photo);urls.push(url);return url};
     const finalsByClient=new Map(),finalsByRecord=new Map();
-    pending.filter(item=>item.type==="final").forEach(item=>{const view={...item,_photoUrl:photoUrl(item)};(item.targetClientId?finalsByClient:finalsByRecord).set(item.targetClientId||item.targetRecordId,view)});
+    pending.filter(item=>item.type==="final").forEach(item=>{const view={...item,_photoUrl:photoUrl(item)};
+    (item.targetClientId?finalsByClient:finalsByRecord).set(item.targetClientId||item.targetRecordId,view)});
     const applyFinal=(record,item)=>item?{...record,...item.fields,status:"COMPLETE",finalPhotoUrl:item._photoUrl,syncStatus:item.status}:record;
     const roots=pending.filter(item=>item.type==="root").map(item=>applyFinal({id:`local-${item.id}`,_pendingClientId:item.id,status:"AWAITING_FINAL",...item.fields,welderId:item.fields.welderId,finalWelderId:"UNK",finalDate:"UNK",finalVtDate:"UNK",rootPhotoUrl:photoUrl(item),finalPhotoUrl:null,syncStatus:item.status},finalsByClient.get(item.id)));
     const direct=pending.filter(item=>item.type==="final-only").map(item=>({id:`local-${item.id}`,status:"COMPLETE",lineNo:item.fields.lineNo,weldNo:item.fields.weldNo,rework:"N/A",welderId:"N/A",rootDate:"N/A",rootVtDate:"N/A",finalWelderId:item.fields.finalWelderId,finalDate:item.fields.finalDate,finalVtDate:item.fields.finalVtDate,rootPhotoUrl:null,finalPhotoUrl:photoUrl(item),syncStatus:item.status}));
     return {roots,direct,finalsByRecord,finalsByClient,urls};
   },[pending]);
   const localCreates=new Set(pending.filter(item=>item.type!=="final").map(item=>item.id));
-  const displayedRecords=[...pendingViews.direct,...pendingViews.roots,...records.filter(r=>!localCreates.has(r.clientRequestId)).map(r=>{const item=pendingViews.finalsByRecord.get(r.id)||pendingViews.finalsByClient.get(r.clientRequestId);return item?{...r,...item.fields,status:"COMPLETE",finalPhotoUrl:item._photoUrl,syncStatus:item.status}:r})];
+  const displayedRecords=[...pendingViews.direct,...pendingViews.roots,...records.filter(r=>!localCreates.has(r.clientRequestId)).map(r=>{const item=pendingViews.finalsByRecord.get(r.id)||pendingViews.finalsByClient.get(r.clientRequestId);
+    return item?{...r,...item.fields,status:"COMPLETE",finalPhotoUrl:item._photoUrl,syncStatus:item.status}:r})];
   const awaiting=displayedRecords.filter(r=>r.status!=="COMPLETE");
   const refreshPending=useCallback(async()=>setPending((await getPending()).sort((a,b)=>a.createdAt.localeCompare(b.createdAt))),[]);
   const refreshLocal=useCallback(async()=>{
     const [items,cached]=await Promise.all([getPending(),getCachedAppData()]);
     setPending(items.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));
-    if(cached){setRecords(cached.records||[]);setWelders(cached.welders||[])}
+    if(cached){setRecords(cached.records||[]);
+      setWelders(cached.welders||[])}
   },[]);
   const load=useCallback(async()=>{
     const [w,i]=await Promise.all([requestJson("/api/welds"),requestJson("/api/welders")]);
     if(!Array.isArray(w.records)||!Array.isArray(i.welders))throw new Error("The server did not return a weld record list.");
     await cacheAppData({records:w.records,welders:i.welders,savedAt:new Date().toISOString()});
-    setRecords(w.records);setWelders(i.welders);
+    setRecords(w.records);
+    setWelders(i.welders);
   },[]);
   const runSync=useCallback(async(options)=>{
     setSyncing(true);
     try{
       const result=await syncPending(options);
       if(typeof result.serverAvailable==="boolean")setServerAvailable(result.serverAvailable);
-      setSyncMessage(result.message||"");setSyncCode(result.code||"");
+      setSyncMessage(result.message||"");
+      setSyncCode(result.code||"");
       await refreshLocal();
       if(result.synced)setNotice(`${result.synced} inspection${result.synced===1?"":"s"} confirmed by the server.`);
       if(result.serverAvailable){
         try{await load()}catch(e){setSyncMessage(`Saved records remain on this device. Could not refresh the server list: ${e.message}`)}
       }
       return result;
-    }catch(e){setSyncMessage(e.message||"Sync could not finish. Pending inspections have been kept.");setSyncCode("storage");throw e}
+    }catch(e){setSyncMessage(e.message||"Sync could not finish. Pending inspections have been kept.");
+      setSyncCode("storage");
+      throw e}
     finally{setSyncing(false)}
   },[load,refreshLocal]);
   useEffect(()=>{
@@ -64,7 +72,8 @@ export default function App(){
     refreshLocal().then(()=>setReady(true)).catch(e=>setError(e.message)).finally(()=>setLoading(false));
     window.addEventListener("weld-sync-change",onQueue);
     window.addEventListener("offline",onOffline);
-    return()=>{window.removeEventListener("weld-sync-change",onQueue);window.removeEventListener("offline",onOffline)};
+    return()=>{window.removeEventListener("weld-sync-change",onQueue);
+    window.removeEventListener("offline",onOffline)};
   },[refreshLocal]);
   useEffect(()=>{
     if(!ready)return;
@@ -76,21 +85,90 @@ export default function App(){
   useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
   useEffect(()=>()=>{if(finalPreview)URL.revokeObjectURL(finalPreview)},[finalPreview]);
   useEffect(()=>()=>{if(directPreview)URL.revokeObjectURL(directPreview)},[directPreview]);
-  const pick=(file,setFile,setUrl,oldUrl)=>{if(!file)return;if(oldUrl)URL.revokeObjectURL(oldUrl);setFile(file);setUrl(URL.createObjectURL(file));setError("")};
-  const reset=()=>{formRef.current?.reset();if(preview)URL.revokeObjectURL(preview);setPhoto(null);setPreview("");setWelderId("UNK")};
-  const saveRoot=async e=>{e.preventDefault();if(!photo){setError("Take or choose a root inspection photo first.");return}setSaving(true);setError("");setNotice("");const raw=new FormData(e.currentTarget),fields={};["lineNo","weldNo","rework","rootDate","rootVtDate"].forEach(k=>fields[k]=clean(raw.get(k)));fields.welderId=welderId;try{await queueInspection("root",fields,photo);reset();await refreshPending();setNotice(`Root inspection for weld ${fields.weldNo} saved on this phone — pending sync.`);setTab("awaiting")}catch(e){setError(e.message)}finally{setSaving(false)}};
-  const openFinal=record=>{setFinalRecord(record);setFinalWelderId(record.welderId||"UNK")};
-  const saveFinal=async e=>{e.preventDefault();if(!finalPhoto){setError("Take or choose a final inspection photo.");return}setSaving(true);setError("");const raw=new FormData(e.currentTarget),fields={lineNo:finalRecord.lineNo,weldNo:finalRecord.weldNo,finalDate:clean(raw.get("finalDate")),finalVtDate:clean(raw.get("finalVtDate")),finalWelderId};try{await queueInspection("final",fields,finalPhoto,finalRecord._pendingClientId||null,finalRecord._pendingClientId?null:finalRecord.id);const weldNo=finalRecord.weldNo;closeFinal();await refreshPending();setNotice(`Final inspection for weld ${weldNo} saved on this phone — pending sync.`);setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
-  const closeFinal=()=>{if(finalPreview)URL.revokeObjectURL(finalPreview);setFinalRecord(null);setFinalPhoto(null);setFinalPreview("");setFinalWelderId("UNK")};
-  const resetDirect=()=>{directFormRef.current?.reset();if(directPreview)URL.revokeObjectURL(directPreview);setDirectPhoto(null);setDirectPreview("");setDirectWelderId("UNK")};
-  const saveDirect=async e=>{e.preventDefault();if(!directPhoto){setError("Take or choose a final inspection photo.");return}setSaving(true);setError("");setNotice("");const raw=new FormData(e.currentTarget),fields={};["lineNo","weldNo","finalDate","finalVtDate"].forEach(k=>fields[k]=clean(raw.get(k)));fields.finalWelderId=directWelderId;try{await queueInspection("final-only",fields,directPhoto);resetDirect();await refreshPending();setNotice(`Final-only inspection for weld ${fields.weldNo} saved on this phone — pending sync.`);setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
-  const removeRecord=async id=>{if(!confirm("Delete this weld record and all of its photos?"))return;const response=await fetch(`/api/welds/${id}`,{method:"DELETE"});if(response.ok)setRecords(records.filter(r=>r.id!==id))};
-  const saveWelder=async()=>{if(!code.trim())return;const url=editing?`/api/welders/${editing}`:"/api/welders",method=editing?"PATCH":"POST";const response=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify({code})}),data=await response.json();if(!response.ok){setError(data.error);return}const next=editing?welders.map(w=>w.id===editing?data.welder:w):[...welders,data.welder];setWelders(next.sort((a,b)=>a.code.localeCompare(b.code)));setCode("");setEditing(null)};
-  const removeWelder=async id=>{if(!confirm("Remove this welder ID? Existing records will not change."))return;const response=await fetch(`/api/welders/${id}`,{method:"DELETE"});if(response.ok)setWelders(welders.filter(w=>w.id!==id))};
-  const csv=useMemo(()=>{const headers=["LINE_NO","WELD_NO","ROOT_DATE","ROOT_VT_DATE","ROOT_WELDER_ID","FINAL_WELDER_ID","DATE","FINAL_VT_DATE"];const quote=v=>`"${clean(v).replaceAll('"','""')}"`;return new File(["\ufeff"+headers.join(",")+"\r\n"+records.map(r=>[r.lineNo,r.weldNo,r.rootDate,r.rootVtDate,r.welderId,r.finalWelderId,r.finalDate,r.finalVtDate].map(quote).join(",")).join("\r\n")],`weld-log-${today()}.csv`,{type:"text/csv;charset=utf-8"})},[records]);
-  const download=()=>{const url=URL.createObjectURL(csv),a=document.createElement("a");a.href=url;a.download=csv.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),500)};
+  const pick=(file,setFile,setUrl,oldUrl)=>{if(!file)return;
+    if(oldUrl)URL.revokeObjectURL(oldUrl);
+    setFile(file);
+    setUrl(URL.createObjectURL(file));
+    setError("")};
+  const reset=()=>{formRef.current?.reset();
+    if(preview)URL.revokeObjectURL(preview);
+    setPhoto(null);
+    setPreview("");
+    setWelderId("UNK")};
+  const saveRoot=async e=>{e.preventDefault();
+    if(!photo){setError("Take or choose a root inspection photo first.");return}setSaving(true);setError("");
+    setNotice("");const raw=new FormData(e.currentTarget),fields={};
+    ["lineNo","weldNo","rework","rootDate","rootVtDate"].forEach(k=>fields[k]=clean(raw.get(k)));
+    fields.welderId=welderId;
+    try{await queueInspection("root",fields,photo);
+      reset();
+      await refreshPending();
+      setNotice(`Root inspection for weld ${fields.weldNo} saved on this phone — pending sync.`);
+      setTab("awaiting")}catch(e){setError(e.message)}finally{setSaving(false)}};
+  const openFinal=record=>{setFinalRecord(record);
+    setFinalWelderId(record.welderId||"UNK")};
+  const saveFinal=async e=>{e.preventDefault();
+    if(!finalPhoto){setError("Take or choose a final inspection photo.");
+    return}setSaving(true);
+    setError("");
+    const raw=new FormData(e.currentTarget),fields={lineNo:finalRecord.lineNo,
+      weldNo:finalRecord.weldNo,
+      finalDate:clean(raw.get("finalDate")),
+      finalVtDate:clean(raw.get("finalVtDate")),
+      finalWelderId
+    };
+    try{await queueInspection("final",fields,finalPhoto,finalRecord._pendingClientId||null,finalRecord._pendingClientId?null:finalRecord.id);
+      const weldNo=finalRecord.weldNo;
+      closeFinal();
+      await refreshPending();
+      setNotice(`Final inspection for weld ${weldNo} saved on this phone — pending sync.`);
+      setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
+  const closeFinal=()=>{if(finalPreview)URL.revokeObjectURL(finalPreview);
+    setFinalRecord(null);
+    setFinalPhoto(null);
+    setFinalPreview("");
+    setFinalWelderId("UNK")};
+  const resetDirect=()=>{directFormRef.current?.reset();
+    if(directPreview)URL.revokeObjectURL(directPreview);
+    setDirectPhoto(null);
+    setDirectPreview("");
+    setDirectWelderId("UNK")};
+  const saveDirect=async e=>{e.preventDefault();
+    if(!directPhoto){setError("Take or choose a final inspection photo.");
+      return}setSaving(true);
+      setError("");setNotice("");
+      const raw=new FormData(e.currentTarget),fields={};
+      ["lineNo","weldNo","finalDate","finalVtDate"].forEach(k=>fields[k]=clean(raw.get(k)));
+      fields.finalWelderId=directWelderId;
+      try{await queueInspection("final-only",fields,directPhoto);
+        resetDirect();await refreshPending();
+        setNotice(`Final-only inspection for weld ${fields.weldNo} saved on this phone — pending sync.`);
+        setTab("records")}catch(e){setError(e.message)}finally{setSaving(false)}};
+  const removeRecord=async id=>{if(!confirm("Delete this weld record and all of its photos?"))return;
+    const response=await fetch(`/api/welds/${id}`,{method:"DELETE"});if(response.ok)setRecords(records.filter(r=>r.id!==id))};
+  const saveWelder=async()=>{if(!code.trim())return;
+    const url=editing?`/api/welders/${editing}`:"/api/welders",method=editing?"PATCH":"POST";
+    const response=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify({code})}),data=await response.json();
+    if(!response.ok){setError(data.error);
+      return}
+      const next=editing?welders.map(w=>w.id===editing?data.welder:w):[...welders,data.welder];
+      setWelders(next.sort((a,b)=>a.code.localeCompare(b.code)));
+      setCode("");
+      setEditing(null)};
+  const removeWelder=async id=>{if(!confirm("Remove this welder ID? Existing records will not change."))return;
+    const response=await fetch(`/api/welders/${id}`,{method:"DELETE"});
+    if(response.ok)setWelders(welders.filter(w=>w.id!==id))};
+  const csv=useMemo(()=>{const headers=["LINE_NO","WELD_NO","ROOT_DATE","ROOT_VT_DATE","ROOT_WELDER_ID","FINAL_WELDER_ID","DATE","FINAL_VT_DATE"];
+    const quote=v=>`"${clean(v).replaceAll('"','""')}"`;
+    return new File(["\ufeff"+headers.join(",")+"\r\n"+records.map(r=>[r.lineNo,r.weldNo,r.rootDate,r.rootVtDate,r.welderId,r.finalWelderId,r.finalDate,r.finalVtDate].map(quote).join(",")).join("\r\n")],`weld-log-${today()}.csv`,{type:"text/csv;charset=utf-8"})},[records]);
+  const download=()=>{const url=URL.createObjectURL(csv),a=document.createElement("a");
+    a.href=url;
+    a.download=csv.name;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),500)};
   const downloadPdf=()=>{window.location.href="/api/export/pdf"};
-  const share=async()=>{if(navigator.canShare?.({files:[csv]}))await navigator.share({title:"Weld Photo Log",files:[csv]});else{download();location.href="mailto:?subject=Weld%20Photo%20Log&body=Attach%20the%20downloaded%20CSV%20file."}};
+  const share=async()=>{if(navigator.canShare?.({files:[csv]}))await navigator.share({title:"Weld Photo Log",files:[csv]});
+  else{download();location.href="mailto:?subject=Weld%20Photo%20Log&body=Attach%20the%20downloaded%20CSV%20file."}};
 
   return <main><header><div className="brand"><span className="logo">◉</span><div><h1>Weld Photo Log</h1><small>Root and final inspection tracker · Sync fix 1.1.1</small></div></div><b>{displayedRecords.length} welds</b></header>
     <div className="shell"><div className={`connection ${serverAvailable?"online":"offline"}`} role="status"><span>{syncing?"Connecting / syncing…":serverAvailable?"Server connected":serverAvailable===null?"Checking server…":"Server unavailable"}</span><b>{!ready?(loading?"Reading phone storage…":"Phone storage unavailable"):pending.length?`${pending.length} pending upload${pending.length===1?"":"s"}`:"All inspections synced"}</b><button onClick={()=>schedulerRef.current?.retry()} disabled={syncing||!ready}>Sync now</button></div>
