@@ -71,6 +71,22 @@ export const deletePending = id => withStore("readwrite", store => store.delete(
 export const getCachedAppData = () => withStore("readonly", store => store.get("latest"), CACHE_STORE);
 export const cacheAppData = data => withStore("readwrite", store => store.put(data, "latest"), CACHE_STORE);
 
+export function cacheUpdatedRecord(record) {
+  return transaction([CACHE_STORE], "readwrite", (tx, done) => {
+    const cache = tx.objectStore(CACHE_STORE);
+    const request = cache.get("latest");
+    request.onsuccess = () => {
+      const previous = request.result || { records: [], welders: [] };
+      const records = previous.records || [];
+      const updated = records.some((item) => item.id === record.id)
+        ? records.map((item) => item.id === record.id ? record : item)
+        : [record, ...records];
+      cache.put({ ...previous, records: updated, savedAt: new Date().toISOString() }, "latest");
+      done(record);
+    };
+  });
+}
+
 export function acknowledge(id, record) {
   return transaction([STORE, CACHE_STORE], "readwrite", (tx, done) => {
     const cache = tx.objectStore(CACHE_STORE);

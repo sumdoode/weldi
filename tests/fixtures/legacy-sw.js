@@ -1,3 +1,4 @@
+// The released custom worker, retained only to test upgrades to vite-plugin-pwa.
 const CACHE = "weld-photo-log-v3-sync-1-1-1";
 const SHELL = ["/", "/manifest.webmanifest", "/weld-icon.svg"];
 
@@ -23,8 +24,6 @@ self.addEventListener("install", event => {
 });
 
 self.addEventListener("activate", event => {
-  // Keep old shell assets for already-open tabs. Never clear IndexedDB or
-  // caches owned by another app; navigation uses the new shell first.
   event.waitUntil(self.clients.claim());
 });
 
@@ -38,7 +37,7 @@ self.addEventListener("fetch", event => {
     try {
       const response = await fetch(event.request, { signal: controller.signal });
       if (response.ok && !response.redirected) {
-        try { await cache.put(event.request, response.clone()); } catch { /* Cache quota must not block an online response. */ }
+        try { await cache.put(event.request, response.clone()); } catch { /* Match the released worker's quota handling. */ }
       }
       return response;
     } catch {

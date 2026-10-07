@@ -1,23 +1,5 @@
 import { useMemo } from "react";
-import { clean, today } from "../utils/inspectionFields.js";
-
-function createCsv(records) {
-  const headers = [
-    "LINE_NO", "WELD_NO", "ROOT_DATE", "ROOT_VT_DATE",
-    "ROOT_WELDER_ID", "FINAL_WELDER_ID", "DATE", "FINAL_VT_DATE",
-  ];
-  const quote = (value) => `"${clean(value).replaceAll('"', '""')}"`;
-  const rows = records.map((record) => [
-    record.lineNo, record.weldNo, record.rootDate, record.rootVtDate,
-    record.welderId, record.finalWelderId, record.finalDate, record.finalVtDate,
-  ].map(quote).join(","));
-
-  return new File(
-    ["\ufeff" + headers.join(",") + "\r\n" + rows.join("\r\n")],
-    `weld-log-${today()}.csv`,
-    { type: "text/csv;charset=utf-8" },
-  );
-}
+import createCsv from "../utils/createCsv.js";
 
 export default function ExportActions({ records }) {
   // Exports only include records confirmed by the server.

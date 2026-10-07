@@ -26,6 +26,7 @@
     "@vitejs/plugin-react": "^5.0.2",
     "concurrently": "^9.2.1",
     "fake-indexeddb": "^6.2.5",
-    "vite": "^7.1.4"
+    "vite": "^7.1.4",
+    "vite-plugin-pwa": "^2.0.0"
   }
 }

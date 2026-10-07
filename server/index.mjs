@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
+import { updateInspectionDetails } from "./weld-records.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(root, "server/data");
@@ -80,6 +81,26 @@ app.patch("/api/welders/:id",async(req,res,next)=>{try{const code=clean(req.body
 app.delete("/api/welders/:id",async(req,res,next)=>{try{await updateDb(db=>{db.welders=db.welders.filter(w=>w.id!==req.params.id);});res.json({deleted:true});}catch(e){next(e);}});
 
 app.get("/api/welds",async(_req,res,next)=>{try{const db=await readDb();const records=db.records.map(normalize).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));res.json({records});}catch(e){next(e);}});
+app.patch("/api/welds/:id", async (req, res, next) => {
+  try {
+    const record = await updateDb((db) => {
+      db.records = db.records.map(normalize);
+      const index = db.records.findIndex((item) => item.id === req.params.id);
+      if (index === -1) throw Object.assign(new Error("Weld record not found."), { status: 404 });
+      const updated = updateInspectionDetails(db.records[index], req.body);
+      db.records[index] = updated;
+      return updated;
+    });
+    res.json({ record });
+  } catch (error) {
+    if (error.status === 400 || error.status === 404) {
+      res.status(error.status).json({ error: error.message });
+    } else {
+      next(error);
+    }
+  }
+});
+
 app.get("/api/export/pdf",async(_req,res,next)=>{
   try{
     const db=await readDb();

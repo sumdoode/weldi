@@ -1,6 +1,6 @@
 import Meta from "./Meta.jsx";
 
-export default function WeldCard({ record, onFinal, onDelete }) {
+export default function WeldCard({ record, onFinal, onEdit, onDelete }) {
   const complete = record.status === "COMPLETE";
   const status = record.syncStatus
     ? record.syncStatus === "failed" ? "SYNC FAILED" : "PENDING SYNC"
@@ -37,13 +37,24 @@ export default function WeldCard({ record, onFinal, onDelete }) {
           <Meta label="Final VT" value={record.finalVtDate} />
           <Meta label="Rework" value={record.rework} />
         </dl>
-        {onFinal && (
-          <button className="add-final" onClick={onFinal}>
-            + Add final inspection
-          </button>
-        )}
+        <div className="record-buttons">
+          {onFinal && (
+            <button className="add-final" onClick={onFinal}>+ Add final inspection</button>
+          )}
+          {onEdit && (
+            <button
+              className="edit-record"
+              onClick={onEdit}
+              disabled={Boolean(record.syncStatus)}
+              title={record.syncStatus ? "Sync this inspection before editing." : "Edit weld record"}
+              aria-label={`Edit weld ${record.weldNo}`}
+            >
+              ✎ Edit
+            </button>
+          )}
+        </div>
       </div>
-      {onDelete && <button className="trash" onClick={onDelete}>⌫</button>}
+      {onDelete && <button className="trash" onClick={onDelete} aria-label={`Delete weld ${record.weldNo}`}>⌫</button>}
     </article>
   );
 }

@@ -1,6 +1,6 @@
 import WeldCard from "./WeldCard.jsx";
 
-export default function WeldRecords({ records, loading, emptyMessage, onFinal, onDelete }) {
+export default function WeldRecords({ records, loading, emptyMessage, onFinal, onEdit, onDelete }) {
   if (!records.length) {
     return <p className="empty">{loading ? "Loading…" : emptyMessage}</p>;
   }
@@ -12,6 +12,7 @@ export default function WeldRecords({ records, loading, emptyMessage, onFinal, o
           key={record.id}
           record={record}
           onFinal={record.status !== "COMPLETE" ? () => onFinal(record) : null}
+          onEdit={onEdit ? () => onEdit(record) : null}
           onDelete={record.syncStatus ? null : () => onDelete(record.id)}
         />
       ))}

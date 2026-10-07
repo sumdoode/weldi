@@ -1,9 +1,12 @@
 import { useRef, useState } from "react";
 import AppHeader from "./components/AppHeader.jsx";
 import AppTabs from "./components/AppTabs.jsx";
+import EditRecordModal from "./components/EditRecordModal.jsx";
 import ExportActions from "./components/ExportActions.jsx";
 import FinalInspectionModal from "./components/FinalInspectionModal.jsx";
 import InspectionForm from "./components/InspectionForm.jsx";
+import PwaUpdatePrompt from "./components/PwaUpdatePrompt.jsx";
+import RecordSearch from "./components/RecordSearch.jsx";
 import SyncStatus from "./components/SyncStatus.jsx";
 import WeldRecords from "./components/WeldRecords.jsx";
 import WelderManager from "./components/WelderManager.jsx";
@@ -11,13 +14,17 @@ import useInspectionPhoto from "./hooks/useInspectionPhoto.js";
 import useWeldData from "./hooks/useWeldData.js";
 import { queueInspection } from "./offlineDb.js";
 import { clean } from "./utils/inspectionFields.js";
+import filterRecords from "./utils/filterRecords.js";
 
 export default function App() {
   const [tab, setTab] = useState("root");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchField, setSearchField] = useState("all");
   const [manage, setManage] = useState(false);
   const [welderId, setWelderId] = useState("UNK");
   const [directWelderId, setDirectWelderId] = useState("UNK");
   const [finalRecord, setFinalRecord] = useState(null);
+  const [editingRecord, setEditingRecord] = useState(null);
   const [finalWelderId, setFinalWelderId] = useState("UNK");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -30,8 +37,11 @@ export default function App() {
   const {
     records, welders, setWelders, pending, loading, ready,
     serverAvailable, syncing, syncMessage, syncCode,
-    displayedRecords, awaiting, refreshPending, removeRecord, retrySync,
+    displayedRecords, awaiting, refreshPending, updateRecord, removeRecord, retrySync,
   } = useWeldData({ onError: setError, onNotice: setNotice });
+  const filteredRecords = filterRecords(displayedRecords, searchQuery, searchField);
+  const filteredAwaiting = filterRecords(awaiting, searchQuery, searchField);
+  const searching = Boolean(searchQuery.trim());
 
   function resetRoot() {
     formRef.current?.reset();
@@ -103,6 +113,19 @@ export default function App() {
     }
   }
 
+  async function saveRecord(fields) {
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const updated = await updateRecord(editingRecord.id, fields);
+      setEditingRecord(null);
+      setNotice(`Changes for weld ${updated.weldNo} saved.`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function openFinal(record) {
     setFinalRecord(record);
     setFinalWelderId(record.welderId || "UNK");
@@ -167,6 +190,7 @@ export default function App() {
         />
         {error && <div className="alert error">× {error}</div>}
         {notice && <div className="alert success">✓ {notice}</div>}
+        <PwaUpdatePrompt busy={saving || syncing} />
         <AppTabs
           tab={tab}
           onChange={setTab}
@@ -208,11 +232,22 @@ export default function App() {
 
         {tab === "awaiting" && (
           <section>
+            <RecordSearch
+              query={searchQuery}
+              field={searchField}
+              onQueryChange={setSearchQuery}
+              onFieldChange={setSearchField}
+              matchCount={filteredAwaiting.length}
+              totalCount={awaiting.length}
+            />
             <WeldRecords
-              records={awaiting}
+              records={filteredAwaiting}
               loading={loading}
-              emptyMessage="No welds are waiting for final inspection."
+              emptyMessage={searching
+                ? "No awaiting welds match your search."
+                : "No welds are waiting for final inspection."}
               onFinal={openFinal}
+              onEdit={setEditingRecord}
               onDelete={removeRecord}
             />
           </section>
@@ -221,11 +256,21 @@ export default function App() {
         {tab === "records" && (
           <section>
             <ExportActions records={records} />
+            <RecordSearch
+              query={searchQuery}
+              field={searchField}
+              onQueryChange={setSearchQuery}
+              onFieldChange={setSearchField}
+              matchCount={filteredRecords.length}
+              totalCount={displayedRecords.length}
+              showExportNote
+            />
             <WeldRecords
-              records={displayedRecords}
+              records={filteredRecords}
               loading={loading}
-              emptyMessage="No weld records yet."
+              emptyMessage={searching ? "No weld records match your search." : "No weld records yet."}
               onFinal={openFinal}
+              onEdit={setEditingRecord}
               onDelete={removeRecord}
             />
           </section>
@@ -239,6 +284,17 @@ export default function App() {
         onWeldersChange={setWelders}
         onError={setError}
       />
+      {editingRecord && (
+        <EditRecordModal
+          key={editingRecord.id}
+          record={editingRecord}
+          welders={welders}
+          onSave={saveRecord}
+          onClose={() => setEditingRecord(null)}
+          saving={saving}
+          syncing={syncing}
+        />
+      )}
       {finalRecord && (
         <FinalInspectionModal
           record={finalRecord}

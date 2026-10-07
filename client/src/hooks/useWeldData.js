@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cacheAppData, getCachedAppData, getPending, pauseSync, syncPending } from "../offlineDb.js";
+import { cacheAppData, cacheUpdatedRecord, getCachedAppData, getPending, pauseSync, syncPending } from "../offlineDb.js";
 import { requestJson } from "../syncCore.js";
 import { createSyncScheduler } from "../syncScheduler.js";
 import useDisplayedRecords from "./useDisplayedRecords.js";
@@ -103,6 +103,24 @@ export default function useWeldData({ onError, onNotice }) {
     };
   }, [ready, runSync]);
 
+  async function updateRecord(id, fields) {
+    const data = await requestJson(`/api/welds/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    if (!data.record || data.record.id !== id) {
+      throw new Error("The server did not confirm the edited record. Please retry.");
+    }
+    setRecords((current) => current.map((record) => record.id === id ? data.record : record));
+    try {
+      await cacheUpdatedRecord(data.record);
+    } catch (error) {
+      onError(`Changes were saved to the server, but the offline record cache could not be updated: ${error.message}`);
+    }
+    return data.record;
+  }
+
   async function removeRecord(id) {
     if (!confirm("Delete this weld record and all of its photos?")) return;
     const response = await fetch(`/api/welds/${id}`, { method: "DELETE" });
@@ -123,6 +141,7 @@ export default function useWeldData({ onError, onNotice }) {
     displayedRecords,
     awaiting,
     refreshPending,
+    updateRecord,
     removeRecord,
     retrySync: () => schedulerRef.current?.retry(),
   };
