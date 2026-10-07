@@ -60,6 +60,15 @@ Your host must provide persistent disk storage or the records/photos can be lost
 - Browser storage is not a backup: the browser/OS can remove site storage. Keep the original camera photos where practical and back up server data and uploads. Previously synced photo previews are only available offline if cached; server synchronization is not a download of every historical photo.
 - Welder-list changes and deletion of server records require a connection; only inspection creation/completion is queued offline.
 
+## Client code structure
+
+- `client/src/App.jsx` coordinates tabs, inspection saves, and dialog visibility.
+- `client/src/components/` contains the inspection forms, shared inputs, sync status, record cards, exports, and welder dialog.
+- `client/src/hooks/useWeldData.js` loads cached/server data and manages foreground sync.
+- `client/src/hooks/useDisplayedRecords.js` combines pending inspections with server records for display.
+- `client/src/hooks/useInspectionPhoto.js` manages selected photos and preview URL cleanup.
+- `client/src/utils/inspectionFields.js` holds the shared date and field formatting helpers.
+
 ## Verification
 
 ```sh
